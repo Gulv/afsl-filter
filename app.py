@@ -1,14 +1,37 @@
 import html
+import os
 import re
 import pandas as pd
 import streamlit as st
 
 # ---------------------------------------------------------------------------
-# Page config & custom CSS
+# Page config & password gate
 # ---------------------------------------------------------------------------
 
 st.set_page_config(page_title="AFSL Condition Filter", layout="wide",
                    initial_sidebar_state="collapsed")
+
+# Password protection
+def check_password():
+    """Show a login form and return True if the password is correct."""
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.markdown("## AFSL Condition Filter")
+    st.markdown("Please enter the password to access this application.")
+    password = st.text_input("Password", type="password", key="password_input")
+    if st.button("Login", type="primary"):
+        # Password is stored in Streamlit secrets (st.secrets) or falls back to default
+        correct_pw = st.secrets.get("password", "afsl2026")
+        if password == correct_pw:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    return False
+
+if not check_password():
+    st.stop()
 
 st.markdown("""
 <style>
@@ -198,13 +221,25 @@ def format_condition_html(condition_text):
 # ---------------------------------------------------------------------------
 
 DATA_FILE = "afs_lic_202603.csv"
-try:
-    df = load_data(DATA_FILE)
-except FileNotFoundError:
-    st.error(f"CSV file '{DATA_FILE}' not found.")
-    st.stop()
 
 st.markdown("## AFSL Condition Filter")
+
+# Allow uploading a new CSV to replace the default
+with st.expander("Upload new AFSL CSV data (optional)"):
+    uploaded = st.file_uploader("Upload a new CSV file to replace the current data",
+                                type=["csv"], key="csv_upload")
+    if uploaded is not None:
+        st.session_state["uploaded_csv"] = uploaded
+        st.success(f"Using uploaded file: {uploaded.name}")
+
+if "uploaded_csv" in st.session_state and st.session_state["uploaded_csv"] is not None:
+    df = load_data(st.session_state["uploaded_csv"])
+else:
+    try:
+        df = load_data(DATA_FILE)
+    except FileNotFoundError:
+        st.error(f"CSV file '{DATA_FILE}' not found.")
+        st.stop()
 
 # ---------------------------------------------------------------------------
 # Filter panels — 4 columns across the top, matching the desktop layout
