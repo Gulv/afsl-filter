@@ -1,6 +1,7 @@
 import html
 import os
 import re
+import requests
 import pandas as pd
 import streamlit as st
 
@@ -168,8 +169,37 @@ ACTIVITY_KEYWORDS = [
 # Data loading & filtering
 # ---------------------------------------------------------------------------
 
+CKAN_API_URL = "https://data.gov.au/data/api/3/action/datastore_search"
+RESOURCE_ID = "d98a113d-6b50-40e6-b65f-2612efc877f4"
+
+
+@st.cache_data(ttl=3600)
+def load_data_from_api():
+    """Fetch all AFSL records from the data.gov.au CKAN DataStore API."""
+    all_records = []
+    offset = 0
+    limit = 1000
+    while True:
+        resp = requests.get(CKAN_API_URL, params={
+            "resource_id": RESOURCE_ID,
+            "limit": limit,
+            "offset": offset,
+        }, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        records = data["result"]["records"]
+        if not records:
+            break
+        all_records.extend(records)
+        offset += limit
+    df = pd.DataFrame(all_records)
+    if "_id" in df.columns:
+        df = df.drop(columns=["_id"])
+    return df
+
+
 @st.cache_data
-def load_data(csv_file):
+def load_data_from_csv(csv_file):
     return pd.read_csv(csv_file, encoding="utf-8-sig")
 
 
@@ -220,25 +250,38 @@ def format_condition_html(condition_text):
 # App
 # ---------------------------------------------------------------------------
 
-DATA_FILE = "afs_lic_202603.csv"
+CSV_FALLBACK = "afs_lic_202603.csv"
 
 st.markdown("## AFSL Condition Filter")
 
-# Allow uploading a new CSV to replace the default
-with st.expander("Upload new AFSL CSV data (optional)"):
-    uploaded = st.file_uploader("Upload a new CSV file to replace the current data",
-                                type=["csv"], key="csv_upload")
-    if uploaded is not None:
-        st.session_state["uploaded_csv"] = uploaded
-        st.success(f"Using uploaded file: {uploaded.name}")
+# Data source selection
+with st.expander("Data Source"):
+    source = st.radio("Load data from:", [
+        "ASIC API (data.gov.au — latest)",
+        "Local CSV file (bundled)",
+        "Upload CSV",
+    ], key="data_source", horizontal=True)
 
-if "uploaded_csv" in st.session_state and st.session_state["uploaded_csv"] is not None:
-    df = load_data(st.session_state["uploaded_csv"])
+    uploaded = None
+    if source == "Upload CSV":
+        uploaded = st.file_uploader("Upload a CSV file", type=["csv"], key="csv_upload")
+
+# Load data based on selection
+if source == "ASIC API (data.gov.au — latest)":
+    try:
+        with st.spinner("Fetching latest data from ASIC (data.gov.au)..."):
+            df = load_data_from_api()
+        st.success(f"Loaded **{len(df):,}** licences from ASIC API (live data)")
+    except Exception as e:
+        st.warning(f"API fetch failed: {e}. Falling back to local CSV.")
+        df = load_data_from_csv(CSV_FALLBACK)
+elif source == "Upload CSV" and uploaded is not None:
+    df = load_data_from_csv(uploaded)
 else:
     try:
-        df = load_data(DATA_FILE)
+        df = load_data_from_csv(CSV_FALLBACK)
     except FileNotFoundError:
-        st.error(f"CSV file '{DATA_FILE}' not found.")
+        st.error(f"CSV file '{CSV_FALLBACK}' not found and API unavailable.")
         st.stop()
 
 # ---------------------------------------------------------------------------
