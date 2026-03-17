@@ -406,7 +406,7 @@ if has_filters:
     display_df = results[display_cols].rename(columns=col_rename).reset_index(drop=True)
     display_df.index = display_df.index + 1
 
-    st.dataframe(display_df, width="100%", height=400)
+    st.dataframe(display_df, height=400)
 
     # Export button
     with btn_col3:
