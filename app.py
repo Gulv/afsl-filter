@@ -318,9 +318,9 @@ st.markdown("---")
 btn_col1, btn_col2, btn_col3, status_col = st.columns([1, 1, 1, 5])
 
 with btn_col1:
-    search_clicked = st.button("Search", type="primary", use_container_width=True)
+    search_clicked = st.button("Search", type="primary")
 with btn_col2:
-    reset_clicked = st.button("Reset", use_container_width=True)
+    reset_clicked = st.button("Reset")
 
 # Handle reset — clear all checkboxes by resetting session state
 if reset_clicked:
@@ -363,14 +363,14 @@ if has_filters:
     display_df = results[display_cols].rename(columns=col_rename).reset_index(drop=True)
     display_df.index = display_df.index + 1
 
-    st.dataframe(display_df, use_container_width=True, height=400)
+    st.dataframe(display_df, width="100%", height=400)
 
     # Export button
     with btn_col3:
         csv_data = results[display_cols + ["AFS_LIC_CONDITION"]].to_csv(index=False)
         st.download_button("Export CSV", csv_data,
                            file_name="afsl_filtered.csv", mime="text/csv",
-                           use_container_width=True)
+                           )
 
     # --- Condition detail viewer ---
     st.markdown("---")
