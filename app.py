@@ -223,19 +223,44 @@ def filter_dataframe(df, activities, deal_subtypes, advice_subtypes,
             sub_mask |= cond_col.str.contains(term, case=False, regex=False, na=False)
         mask &= sub_mask
 
-    # Advice subtypes: OR logic
-    # Unqualified "provide financial product advice" covers both general and personal
+    # Advice subtypes:
+    # Broad "provide financial product advice" (without general/personal qualifier)
+    # covers both types — i.e. the licence can provide both general and personal advice.
+    # - 1 subtype, no exclusive: that subtype OR broad (covers both)
+    # - 2 subtypes, no exclusive: (general AND personal) OR broad
+    # - subtype + exclusive: only that subtype, exclude others and broad
     if advice_subtypes:
-        sub_mask = pd.Series(False, index=df.index)
-        for term in advice_subtypes:
-            sub_mask |= cond_col.str.contains(term, case=False, regex=False, na=False)
-        # Also match unqualified "provide financial product advice" (no general/personal qualifier)
-        has_broad = cond_col.str.contains("provide financial product advice", case=False, regex=False, na=False)
         has_general = cond_col.str.contains("general financial product advice", case=False, regex=False, na=False)
         has_personal = cond_col.str.contains("personal financial product advice", case=False, regex=False, na=False)
-        unqualified = has_broad & ~has_general & ~has_personal
-        sub_mask |= unqualified
-        mask &= sub_mask
+        has_any = cond_col.str.contains("provide financial product advice", case=False, regex=False, na=False)
+        broad_both = has_any & ~has_general & ~has_personal  # covers both types
+
+        sel_general = "general financial product advice" in advice_subtypes
+        sel_personal = "personal financial product advice" in advice_subtypes
+
+        if exclusive_advice:
+            # Exclusive: only the selected subtype(s), exclude others
+            if sel_general and sel_personal:
+                # Both + exclusive: (general AND personal) OR broad (covers both)
+                mask &= (has_general & has_personal) | broad_both
+            elif sel_general:
+                mask &= has_general
+                mask &= ~has_personal
+                mask &= ~broad_both
+            else:
+                mask &= has_personal
+                mask &= ~has_general
+                mask &= ~broad_both
+        else:
+            if sel_general and sel_personal:
+                # Both selected: can provide both → (general AND personal) OR broad
+                mask &= (has_general & has_personal) | broad_both
+            else:
+                # Single subtype: that subtype OR broad (which covers both)
+                term = advice_subtypes[0]
+                sub_mask = cond_col.str.contains(term, case=False, regex=False, na=False)
+                sub_mask |= broad_both
+                mask &= sub_mask
 
     # Product types: OR logic (any selected product matches)
     if products:
@@ -251,12 +276,6 @@ def filter_dataframe(df, activities, deal_subtypes, advice_subtypes,
     # Exclusive: reject if any non-selected product type is also present
     if exclusive_products and products:
         excluded = [t for t in PRODUCT_TYPES.values() if t not in products]
-        for term in excluded:
-            mask &= ~cond_col.str.contains(term, case=False, regex=False, na=False)
-
-    # Exclusive advice: reject if any non-selected advice subtype is also present
-    if exclusive_advice and advice_subtypes:
-        excluded = [t for t in ADVICE_SUBTYPES.values() if t not in advice_subtypes]
         for term in excluded:
             mask &= ~cond_col.str.contains(term, case=False, regex=False, na=False)
 
