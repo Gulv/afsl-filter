@@ -204,7 +204,8 @@ def load_data_from_csv(csv_file):
 
 
 def filter_dataframe(df, activities, deal_subtypes, advice_subtypes,
-                     products, clients, restrictions):
+                     products, clients, restrictions,
+                     exclusive_products=False, no_restrictions=False):
     mask = pd.Series(True, index=df.index)
     cond_col = df["AFS_LIC_CONDITION"].fillna("")
 
@@ -217,6 +218,17 @@ def filter_dataframe(df, activities, deal_subtypes, advice_subtypes,
     for term_list in [deal_subtypes, advice_subtypes, products, clients, restrictions]:
         for term in term_list:
             mask &= cond_col.str.contains(term, case=False, regex=False, na=False)
+
+    # Exclusive: reject if any non-selected product type is also present
+    if exclusive_products and products:
+        excluded = [t for t in PRODUCT_TYPES.values() if t not in products]
+        for term in excluded:
+            mask &= ~cond_col.str.contains(term, case=False, regex=False, na=False)
+
+    # No restrictions: exclude licences containing any restriction keyword
+    if no_restrictions:
+        for term in RESTRICTION_FILTERS.values():
+            mask &= ~cond_col.str.contains(term, case=False, regex=False, na=False)
 
     return df[mask]
 
@@ -335,6 +347,8 @@ with col3:
     for label, term in PRODUCT_TYPES.items():
         if st.checkbox(label, key=f"prod_{label}"):
             selected_products.append(term)
+    st.markdown('<div class="filter-sep"></div>', unsafe_allow_html=True)
+    exclusive_products = st.checkbox("Exclusive (no other products)", key="exclusive_prod")
 
 # --- Column 4: Client Type & Restrictions ---
 with col4:
@@ -352,6 +366,8 @@ with col4:
     for label, term in RESTRICTION_FILTERS.items():
         if st.checkbox(label, key=f"res_{label}"):
             selected_restrictions.append(term)
+    st.markdown('<div class="filter-sep"></div>', unsafe_allow_html=True)
+    no_restrictions = st.checkbox("No restrictions", key="no_restrictions")
 
 # ---------------------------------------------------------------------------
 # Buttons & status bar
@@ -368,20 +384,23 @@ with btn_col2:
 # Handle reset — clear all checkboxes by resetting session state
 if reset_clicked:
     for key in list(st.session_state.keys()):
-        if key.startswith(("act_", "deal_", "adv_", "prod_", "cl_", "res_")):
+        if key.startswith(("act_", "deal_", "adv_", "prod_", "cl_", "res_")) or key in ("exclusive_prod", "no_restrictions"):
             st.session_state[key] = False
     st.session_state["searched"] = False
     st.rerun()
 
 # Gather all filters
 has_filters = any([selected_activities, selected_deal_subs, selected_advice_subs,
-                   selected_products, selected_clients, selected_restrictions])
+                   selected_products, selected_clients, selected_restrictions,
+                   exclusive_products, no_restrictions])
 
 # Run search automatically when any filter is ticked (live filtering)
 if has_filters:
     results = filter_dataframe(df, selected_activities, selected_deal_subs,
                                selected_advice_subs, selected_products,
-                               selected_clients, selected_restrictions)
+                               selected_clients, selected_restrictions,
+                               exclusive_products=exclusive_products,
+                               no_restrictions=no_restrictions)
 
     with status_col:
         st.markdown(f"**Found {len(results):,} of {len(df):,} licences**")
