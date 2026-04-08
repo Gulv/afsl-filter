@@ -205,7 +205,8 @@ def load_data_from_csv(csv_file):
 
 def filter_dataframe(df, activities, deal_subtypes, advice_subtypes,
                      products, clients, restrictions,
-                     exclusive_products=False, no_restrictions=False):
+                     exclusive_products=False, exclusive_advice=False,
+                     no_restrictions=False):
     mask = pd.Series(True, index=df.index)
     cond_col = df["AFS_LIC_CONDITION"].fillna("")
 
@@ -215,13 +216,47 @@ def filter_dataframe(df, activities, deal_subtypes, advice_subtypes,
         else:
             mask &= cond_col.str.contains(term, case=False, regex=False, na=False)
 
-    for term_list in [deal_subtypes, advice_subtypes, products, clients, restrictions]:
+    # Deal subtypes: OR logic (any selected subtype matches)
+    if deal_subtypes:
+        sub_mask = pd.Series(False, index=df.index)
+        for term in deal_subtypes:
+            sub_mask |= cond_col.str.contains(term, case=False, regex=False, na=False)
+        mask &= sub_mask
+
+    # Advice subtypes: OR logic
+    # Unqualified "provide financial product advice" covers both general and personal
+    if advice_subtypes:
+        sub_mask = pd.Series(False, index=df.index)
+        for term in advice_subtypes:
+            sub_mask |= cond_col.str.contains(term, case=False, regex=False, na=False)
+        # Also match unqualified "provide financial product advice" (no general/personal qualifier)
+        has_broad = cond_col.str.contains("provide financial product advice", case=False, regex=False, na=False)
+        has_general = cond_col.str.contains("general financial product advice", case=False, regex=False, na=False)
+        has_personal = cond_col.str.contains("personal financial product advice", case=False, regex=False, na=False)
+        unqualified = has_broad & ~has_general & ~has_personal
+        sub_mask |= unqualified
+        mask &= sub_mask
+
+    # Product types: OR logic (any selected product matches)
+    if products:
+        sub_mask = pd.Series(False, index=df.index)
+        for term in products:
+            sub_mask |= cond_col.str.contains(term, case=False, regex=False, na=False)
+        mask &= sub_mask
+
+    for term_list in [clients, restrictions]:
         for term in term_list:
             mask &= cond_col.str.contains(term, case=False, regex=False, na=False)
 
     # Exclusive: reject if any non-selected product type is also present
     if exclusive_products and products:
         excluded = [t for t in PRODUCT_TYPES.values() if t not in products]
+        for term in excluded:
+            mask &= ~cond_col.str.contains(term, case=False, regex=False, na=False)
+
+    # Exclusive advice: reject if any non-selected advice subtype is also present
+    if exclusive_advice and advice_subtypes:
+        excluded = [t for t in ADVICE_SUBTYPES.values() if t not in advice_subtypes]
         for term in excluded:
             mask &= ~cond_col.str.contains(term, case=False, regex=False, na=False)
 
@@ -335,6 +370,9 @@ with col2:
         for label, term in ADVICE_SUBTYPES.items():
             if st.checkbox(label, key=f"adv_{label}"):
                 selected_advice_subs.append(term)
+        exclusive_advice = st.checkbox("Exclusive (no other advice type)", key="exclusive_adv")
+    else:
+        exclusive_advice = False
 
     if not deal_selected and not advice_selected:
         st.caption("Select 'Deal' or 'Advice' in Activity Type to see sub-options.")
@@ -384,7 +422,7 @@ with btn_col2:
 # Handle reset — clear all checkboxes by resetting session state
 if reset_clicked:
     for key in list(st.session_state.keys()):
-        if key.startswith(("act_", "deal_", "adv_", "prod_", "cl_", "res_")) or key in ("exclusive_prod", "no_restrictions"):
+        if key.startswith(("act_", "deal_", "adv_", "prod_", "cl_", "res_")) or key in ("exclusive_prod", "exclusive_adv", "no_restrictions"):
             st.session_state[key] = False
     st.session_state["searched"] = False
     st.rerun()
@@ -392,7 +430,7 @@ if reset_clicked:
 # Gather all filters
 has_filters = any([selected_activities, selected_deal_subs, selected_advice_subs,
                    selected_products, selected_clients, selected_restrictions,
-                   exclusive_products, no_restrictions])
+                   exclusive_products, exclusive_advice, no_restrictions])
 
 # Run search automatically when any filter is ticked (live filtering)
 if has_filters:
@@ -400,6 +438,7 @@ if has_filters:
                                selected_advice_subs, selected_products,
                                selected_clients, selected_restrictions,
                                exclusive_products=exclusive_products,
+                               exclusive_advice=exclusive_advice,
                                no_restrictions=no_restrictions)
 
     with status_col:
